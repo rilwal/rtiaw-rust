@@ -5,10 +5,7 @@ extern crate glm;
 
 pub mod renderer;
 
-use std::{ffi::c_void, mem::size_of};
-use glfw::{Action, Context, Key};
 use renderer::{Renderer, Color, color, WINDOW_WIDTH, WINDOW_HEIGHT};
-
 
 struct Sphere {
     center: glm::Vec3,
@@ -26,8 +23,6 @@ struct Camera {
     focal_length: f32
 }
 
-
-static mut t_values : Option<Vec<f32>> = None;
 
 
 fn ray_sphere_intersection(ray: &Ray, sphere: &Sphere) -> bool {
@@ -61,18 +56,17 @@ impl Camera {
     }
 
     pub fn cast_rays(&self, renderer: &mut Renderer) {
-        let origin = glm::vec3(0.0, 0.0, 0.0);
         let horizontal = glm::vec3(2.0, 0.0, 0.0);
         let vertical = glm::vec3(0.0, 2.0, 0.0);
 
-        let lower_left_corner = origin - horizontal/2.0 - vertical/2.0 - glm::vec3(0.0, 0.0, self.focal_length);
+        let lower_left_corner = self.pos - horizontal/2.0 - vertical/2.0 - glm::vec3(0.0, 0.0, self.focal_length);
 
-        for y in 0..renderer::WINDOW_HEIGHT {
-            for x in 0..renderer::WINDOW_WIDTH {
-                let u = x as f32 / ((renderer::WINDOW_WIDTH - 1) as f32);
-                let v = y as f32 / ((renderer::WINDOW_HEIGHT - 1) as f32);
+        for y in 0..WINDOW_HEIGHT {
+            for x in 0..WINDOW_WIDTH {
+                let u = x as f32 / ((WINDOW_WIDTH - 1) as f32);
+                let v = y as f32 / ((WINDOW_HEIGHT - 1) as f32);
 
-                let ray = Ray{origin: origin, dir: lower_left_corner + horizontal*u + vertical*v - origin};
+                let ray = Ray{origin: self.pos, dir: lower_left_corner + horizontal*u + vertical*v - self.pos};
                 let color = self.cast_ray(&ray);
 
                 renderer.set_pixel(x as u32, y as u32, &color);
@@ -83,10 +77,6 @@ impl Camera {
 
 
 fn main() {
-    unsafe {
-        t_values = Some(Vec::with_capacity((WINDOW_WIDTH * WINDOW_HEIGHT) as usize));
-        t_values.as_mut().unwrap().resize(WINDOW_WIDTH * WINDOW_HEIGHT, 0.0);
-    }
 
     let s = Sphere {
         center: glm::vec3(0.0, 0.0, 0.0),

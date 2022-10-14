@@ -94,10 +94,7 @@ impl Renderer {
     
         // And model data
         let mut model_data = [glm::vec3(-1.0, -1.0, 0.0), glm::vec3(1.0, -1.0, 0.0), glm::vec3(-1.0, 1.0, 0.0),  glm::vec3(1.0, -1.0, 0.0), glm::vec3(-1.0, 1.0, 0.0), glm::vec3(1.0, 1.0, 0.0)];
-    
-        println!("Model data.len(): {}", model_data.len());
-        println!("size of vec3: {}", size_of::<glm::Vec3>());
-    
+        
 
         let mut vert_shader_id : u32 = 0;
         let mut frag_shader_id : u32 = 0;
@@ -170,6 +167,8 @@ impl Renderer {
             gl::UseProgram(self.program);
             gl::BindTexture(gl::TEXTURE_2D, self.texture);
 
+            // Upload texture to GPU
+            // TODO: Track if this really changed!
             gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, WINDOW_WIDTH as i32, WINDOW_HEIGHT as i32, 0, gl::RGB, gl::UNSIGNED_BYTE, self.image_data.as_mut_ptr() as *const c_void);
 
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
