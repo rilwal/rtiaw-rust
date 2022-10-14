@@ -77,17 +77,10 @@ impl Camera {
 
 
 fn main() {
-
-    let s = Sphere {
-        center: glm::vec3(0.0, 0.0, 0.0),
-        radius: 1.0
-    };
-
     let camera = Camera {
         pos: glm::vec3(0.0, 0.0, 0.0),
         focal_length: 1.0
     };
-
 
     let mut renderer = Renderer::create();
 

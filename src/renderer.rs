@@ -4,7 +4,7 @@ extern crate gl;
 extern crate glm;
 
 use std::{ffi::c_void, mem::size_of};
-use glfw::{Glfw, Action, Context, Key, WindowEvent};
+use glfw::{Glfw, Action, Context, Key};
 
 pub const WINDOW_WIDTH : usize = 1024;
 pub const WINDOW_HEIGHT : usize = 1024;
@@ -21,7 +21,7 @@ pub fn color(r: u8, g: u8, b: u8) -> Color {
 }
 
 
-const vert_shader_src : &str = r#"
+const VERT_SHADER_SRC : &str = r#"
 #version 330 core
 layout (location = 0) in vec3 aPos;
 
@@ -32,7 +32,7 @@ void main()
 "#;
 
 
-const frag_shader_src : &str = r#"
+const FRAG_SHADER_SRC : &str = r#"
 #version 330 core
 out vec4 FragColor;
 uniform sampler2D tex;
@@ -77,7 +77,7 @@ impl Renderer {
         
         let glfw = self.glfw.as_mut().unwrap();
 
-        let (mut window, events) = glfw.create_window(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32, "Hello this is window", glfw::WindowMode::Windowed)
+        let (window, events) = glfw.create_window(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32, "Hello this is window", glfw::WindowMode::Windowed)
         .expect("Failed to create GLFW window.");
     
         self.window = Some(window);
@@ -94,10 +94,6 @@ impl Renderer {
     
         // And model data
         let mut model_data = [glm::vec3(-1.0, -1.0, 0.0), glm::vec3(1.0, -1.0, 0.0), glm::vec3(-1.0, 1.0, 0.0),  glm::vec3(1.0, -1.0, 0.0), glm::vec3(-1.0, 1.0, 0.0), glm::vec3(1.0, 1.0, 0.0)];
-        
-
-        let mut vert_shader_id : u32 = 0;
-        let mut frag_shader_id : u32 = 0;
         
         unsafe {
             // Setup a texture
@@ -129,14 +125,14 @@ impl Renderer {
             gl::BindVertexArray(0);
     
             // and lastly, let's setup some shaders!
-            vert_shader_id = gl::CreateShader(gl::VERTEX_SHADER);
-            frag_shader_id = gl::CreateShader(gl::FRAGMENT_SHADER);
+            let vert_shader_id = gl::CreateShader(gl::VERTEX_SHADER);
+            let frag_shader_id = gl::CreateShader(gl::FRAGMENT_SHADER);
     
-            let vert_shader_src_ptr = vert_shader_src.as_ptr() as *const i8;
-            let vert_shader_len = vert_shader_src.len() as i32;
+            let vert_shader_src_ptr = VERT_SHADER_SRC.as_ptr() as *const i8;
+            let vert_shader_len = VERT_SHADER_SRC.len() as i32;
     
-            let frag_shader_src_ptr = frag_shader_src.as_ptr() as *const i8;
-            let frag_shader_len = frag_shader_src.len() as i32;
+            let frag_shader_src_ptr = FRAG_SHADER_SRC.as_ptr() as *const i8;
+            let frag_shader_len = FRAG_SHADER_SRC.len() as i32;
     
             gl::ShaderSource(vert_shader_id, 1, &vert_shader_src_ptr as *const *const i8, &vert_shader_len); 
             gl::CompileShader(vert_shader_id);
@@ -158,9 +154,10 @@ impl Renderer {
         let events = self.events.as_ref().unwrap();
         let window = self.window.as_mut().unwrap();
 
+        let (w, h) = window.get_framebuffer_size();
+
         // Render the texture here
         unsafe {
-            let (w, h) = window.get_framebuffer_size();
             gl::Viewport(0, 0, w, h);
 
             gl::BindVertexArray(self.vao); // reload all our settings
@@ -168,15 +165,14 @@ impl Renderer {
             gl::BindTexture(gl::TEXTURE_2D, self.texture);
 
             // Upload texture to GPU
-            // TODO: Track if this really changed!
+            // TODO: Track if this really changed, save time by only updating when necessary!
             gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, WINDOW_WIDTH as i32, WINDOW_HEIGHT as i32, 0, gl::RGB, gl::UNSIGNED_BYTE, self.image_data.as_mut_ptr() as *const c_void);
 
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
             gl::DrawArrays(gl::TRIANGLES, 0, 6);
-
-            window.swap_buffers();
         }
 
+        window.swap_buffers();
 
         glfw.poll_events();
         for (_, event) in glfw::flush_messages(&events) {
