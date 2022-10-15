@@ -190,7 +190,7 @@ impl Renderer {
     }
 
     pub fn set_pixel(&mut self, x : u32, y : u32, c : &Color) {
-        self.image_data[((WINDOW_HEIGHT as u32 - 1 - y) * WINDOW_WIDTH as u32 + x) as usize] = *c;
+        self.image_data[(y * WINDOW_WIDTH as u32 + x) as usize] = *c;
     }
 }
 
