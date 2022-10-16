@@ -3,17 +3,21 @@ extern crate glfw;
 extern crate gl;
 extern crate glm;
 
-use std::thread;
+use std::thread::current;
+use std::{thread, num};
 use std::sync::mpsc::{channel, Sender, Receiver};
 
 pub mod renderer;
 
-use glm::vec3;
+use glm::{vec3, vec4};
+use lazy_static::lazy_static;
 use renderer::{Renderer, Color, color, WINDOW_WIDTH, WINDOW_HEIGHT};
 
-const SAMPLES_PER_PIXEL : u32 = 250;
+const RIS_NUM_SAMPLES : usize = 32;
+const SAMPLES_PER_PIXEL : u32 = 1024;
 const SAMPLES_PER_PASS : u32 = 10;
-const NUM_THREADS : usize = 8;
+const NUM_THREADS : usize = 6;
+const FIB_SPHERE_POINTS : usize = 1000;
 
 #[derive(Copy, Clone)]
 struct Material {
@@ -49,6 +53,7 @@ struct Camera {
     focal_length: f32
 }
 
+
 #[derive(Copy, Clone)]
 struct HitRecord {
     dist: f32,
@@ -57,14 +62,49 @@ struct HitRecord {
     mat: Material
 }
 
-lazy_static::lazy_static! {
+lazy_static! {
     static ref SCENE : Scene = Scene{
         spheres: vec![
-            sphere(vec3(0.0, -500.0, 0.0), 500.0, vec3(0.9, 0.9, 0.9), 0.0),
-            sphere(vec3(0.0, 0.5, -2.0), 0.5, vec3(1.0,0.0,0.0), 0.6), 
-            sphere(vec3(0.0, 10.0, 0.0), 4.0, vec3(1.0, 1.0, 0.8), 0.9),
-            sphere(vec3(0.0, 0.2, -1.0), 0.2, vec3(1.0, 1.0, 0.0), 0.0)]
+            sphere(vec3(0.0, -500.0, 0.0), 500.0, vec3(0.6, 0.6, 0.6), 0.0),
+            sphere(vec3(0.0, 0.5, -2.0), 0.5, vec3(1.0,0.0,0.0), 0.0), 
+            sphere(vec3(-0.6, 0.2, -1.7), 0.2, vec3(1.0,1.0,1.0), 0.0), 
+            sphere(vec3(4.0, 4.0, -1.0), 2.0, vec3(1.0, 1.0, 1.0), 10.0),
+            sphere(vec3(-5.0, 1.0, -2.0), 0.1, vec3(1.0, 1.0, 1.0), 5.0),
+           // sphere(vec3(0.0, 10.0, -1.0), 1.0, vec3(1.0, 1.0, 1.0), 40.0),
+            sphere(vec3(0.0, 1.0, -4.0), 1.0, vec3(0.0, 0.0, 1.0), 0.0),
+            sphere(vec3(0.0, 0.25, -1.0), 0.2, vec3(1.0, 1.0, 0.0), 0.0)]
     };
+
+    static ref LIGHTS : Vec<&'static Sphere> = {
+        let mut out = Vec::new();
+
+        for sphere in &SCENE.spheres {
+            if sphere.mat.brightness > 0.1 {
+                out.push(sphere);
+            }
+        }
+
+        out
+    };
+
+    static ref FIB_SPHERE : Vec<glm::Vec3> = {
+        let mut points = Vec::<glm::Vec3>::with_capacity(FIB_SPHERE_POINTS);
+        let phi = std::f32::consts::PI * (3.0 - 5.0_f32.sqrt());
+        
+        for i in 0..FIB_SPHERE_POINTS {
+            let y = 1.0 - (i as f32 / (FIB_SPHERE_POINTS - 1) as f32) * 2.0;
+            let radius = (1.0 - y * y).sqrt();
+            let theta = phi * i as f32;
+    
+            let x = theta.cos() * radius;
+            let z = theta.sin() * radius;
+    
+            points.push(vec3(x, y, z));
+        }
+    
+        points   
+    };
+
 }
 
 
@@ -95,8 +135,6 @@ fn random_vec3_in_hemi(normal : glm::Vec3) -> glm::Vec3 {
         false => -r
     }
 }
-
-
 
 
 fn ray_sphere_intersection(ray: &Ray, sphere: &Sphere, t_min : f32, t_max : f32) -> Option<HitRecord> {
@@ -130,12 +168,44 @@ fn ray_sphere_intersection(ray: &Ray, sphere: &Sphere, t_min : f32, t_max : f32)
 }
 
 
+fn random_point_on_light() -> (&'static Sphere, glm::Vec3) {
+    // First, select a random light and a random point on a unit sphere
+    let light = LIGHTS[fastrand::usize(0..LIGHTS.len())];
+    let point = FIB_SPHERE[fastrand::usize(0..FIB_SPHERE.len())];
+
+    // Then, return it as a point on the light
+    (light, light.center + point * light.radius)
+}
+
+
 impl Camera {
 
-    pub fn cast_ray(ray: &Ray, depth : u32) -> glm::Vec3 {
-        if depth <= 0 {
-            return vec3(0.0, 0.0, 0.0);
+    // Returns only the distance to hit for a given ray
+    pub fn ray_hits(ray: &Ray, target: &Sphere) -> bool {
+        let mut closest_hit: Option<HitRecord> = None;
+        let mut closest_sphere: Option<&Sphere> = None;
+
+        for sphere in &SCENE.spheres {   
+            if let Some(hit) = ray_sphere_intersection(ray, &sphere, 0.001, 10000.0) {
+                if closest_hit.is_none() {
+                    closest_hit = Some(hit);
+                    closest_sphere = Some(sphere);
+                } 
+                if hit.dist < closest_hit.as_ref().unwrap().dist{
+                    closest_hit = Some(hit);
+                    closest_sphere = Some(sphere);                
+                }
+            }
         }
+
+        match closest_sphere {
+            None => false,
+            Some(x) => std::ptr::eq(target, x)
+        }
+    }
+
+    pub fn cast_ray(ray: &Ray) -> glm::Vec3 {
+        let mut color = vec3(0.0, 0.0, 0.0);
 
         let mut closest_hit: Option<HitRecord> = None;
 
@@ -151,15 +221,55 @@ impl Camera {
         }
 
         if let Some(hit) = closest_hit {
-            let target = random_vec3_in_hemi(hit.norm);
-            return hit.mat.color * hit.mat.brightness + hit.mat.color * Camera::cast_ray(&Ray{origin: hit.point, dir: target}, depth - 1) * 0.8;
+            // Let's try reSTIR type of thing here!
+
+            if hit.mat.brightness > 0.001 {
+                return hit.mat.color;
+            }
+
+            // For resampled importance sampling, we first take some points on some light sources!
+           // let mut samples = Vec::with_capacity(RIS_NUM_SAMPLES);
+            
+            let mut total_weight = 0.0;
+
+            let mut current_sample : Option<(&Sphere, glm::Vec3, f32)> = None;
+
+            for i in 0..RIS_NUM_SAMPLES {
+                // First, take a random point on a random light
+                let (light, point) = random_point_on_light();
+                
+                // Then calculate our weight
+                let light_dir = glm::normalize(point - hit.point);
+
+                let weight = glm::length(hit.mat.color * light.mat.color * glm::dot(light_dir, hit.norm) * glm::dot(point - hit.point, point - hit.point));
+
+                if current_sample.is_none() {
+                    current_sample = Some((light, point, weight));
+                } else {
+                    if fastrand::f32() * (total_weight + weight) > total_weight {
+                        current_sample = Some((light, point, weight));
+                    }
+                }
+
+                total_weight += weight;
+            }            
+
+
+
+            let (light, point, weight) = current_sample.unwrap();
+
+            let light_dir = glm::normalize(point - hit.point);
+            let ray = Ray{origin: hit.point, dir: light_dir};
+
+            if Camera::ray_hits(&ray, &light) {
+                let l_dot_n = glm::dot(light_dir, hit.norm);
+                let d_squared = glm::dot(point - hit.point, point - hit.point);
+                let w = (total_weight / RIS_NUM_SAMPLES as f32) / weight;
+                color = color + (hit.mat.color * light.mat.color * light.mat.brightness * (l_dot_n / d_squared) * w);
+            } 
         }
         
-
-        let unit_direction = glm::normalize(ray.dir);
-        let t = 0.5 * (unit_direction.y + 1.0);
-        return glm::vec3(1.0, 1.0, 1.0) * (1.0 - t) + glm::vec3(0.5, 0.7, 1.0) * t;
-
+        color
     }
 
     pub fn cast_rays(&self, tx: Sender<Pixel>) {
@@ -199,19 +309,23 @@ impl Camera {
                     
                                 let ray = Ray{origin: pos, dir: lower_left_corner + horizontal*u + vertical*v - pos};
                                 
-                                color = color + Camera::cast_ray(&ray, 2);
+                                color = color + Camera::cast_ray(&ray);
                             }
                             
                             local_color_cache[local_pixel_index] = color;
 
-                            let scale = 1.0 / (i * SAMPLES_PER_PASS) as f32;
+                            let scale = 1.0 / ((i + 1) * SAMPLES_PER_PASS) as f32;
                             color = vec3((scale * color.x).sqrt(), (scale * color.y).sqrt(), (scale * color.z).sqrt());
                             
+                            //color = color / (i * SAMPLES_PER_PASS) as f32;
+
                             let c = Color{r: (color.x * 255.0) as u8, g: (color.y * 255.0) as u8, b: (color.z * 255.0) as u8};
                             tx.send(Pixel{x: x as u32, y: y as u32, c: c});
                         }
                     }
                 }
+
+                println!("Thread finished!");
             });
         }
     }
@@ -225,20 +339,22 @@ struct Pixel {
 }
 
 fn main() {
+
     let camera = Camera {
         pos: glm::vec3(0.0, 1.0, 1.0),
         focal_length: 1.0
     };
 
     let mut renderer = Renderer::create();
-
     renderer.initialize();
+
+
 
     let (tx, rx) = channel::<Pixel>();
     camera.cast_rays(tx);
 
     while !renderer.should_close() {
-        for _ in 0..WINDOW_WIDTH * 256 {
+        for _ in 0..WINDOW_WIDTH*256 {
             if let Ok(j) = rx.recv() {
                 renderer.set_pixel(j.x, j.y, &j.c);
             }
