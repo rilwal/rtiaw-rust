@@ -50,7 +50,7 @@ pub struct Renderer {
     glfw : Option<Glfw>,
     window : Option<glfw::Window>,
     events : Option<std::sync::mpsc::Receiver<(f64, glfw::WindowEvent)>>,
-    image_data : Vec<Color>,
+    pub image_data : Vec<Color>,
     vao: u32,
     vbo: u32,
     texture: u32,
@@ -77,7 +77,7 @@ impl Renderer {
         
         let glfw = self.glfw.as_mut().unwrap();
 
-        let (window, events) = glfw.create_window(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32, "Hello this is window", glfw::WindowMode::Windowed)
+        let (window, events) = glfw.create_window(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32, "Rusty Raytracer", glfw::WindowMode::Windowed)
         .expect("Failed to create GLFW window.");
     
         self.window = Some(window);
