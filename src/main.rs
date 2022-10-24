@@ -6,7 +6,6 @@ extern crate glm;
 use std::time::Instant;
 use std::{thread};
 use std::sync::mpsc::{channel, Sender};
-use std::sync::atomic::Ordering::Acquire;
 
 
 pub mod renderer;
@@ -15,20 +14,15 @@ use glm::{vec3};
 use lazy_static::lazy_static;
 use renderer::{Renderer, Color, color, WINDOW_WIDTH, WINDOW_HEIGHT};
 
-const RESTIR_ENABLE : bool = false;
-const SAMPLES_PER_PIXEL_RESTIR : u32 = 20;       // The total number of times to process each pixel
-const SAMPLES_PER_PASS_RESTIR : u32 = 10;          // How many times to process a pixel before presenting to the screen
-const RIS_NUM_PICK : usize = 8;             // The number of samples to use from each reservoir
-const RIS_NUM_SAMPLES : usize = 32;         // The number of samples to insert into each reservoir
+const SAMPLES_PER_PIXEL : u32 = 20;       // The total number of times to process each pixel
+const SAMPLES_PER_PASS : u32 = 2;          // How many times to process a pixel before presenting to the screen
+const RIS_NUM_PICK : usize = 4;             // The number of samples to use from each reservoir
+const RIS_NUM_SAMPLES : usize = 16;         // The number of samples to insert into each reservoir
 
-const SAMPLES_PER_PIXEL : u32 = 5000;       // The total number of times to process each pixel
-const SAMPLES_PER_PASS : u32 = 500;          // How many times to process a pixel before presenting to the screen
 
 const NUM_THREADS : usize = 16;              // The number of threads to run on
 const FIB_SPHERE_POINTS : usize = 1000;     // The number of points to generate as candidates on each light source
 
-
-static mut ActiveThreads : std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(NUM_THREADS);
 
 #[derive(Copy, Clone)]
 struct Material {
@@ -73,37 +67,6 @@ struct HitRecord {
     mat: Material
 }
 
-// Struct for reservoir sampling!
-// Consider larger resorvoirs for more performance!
-// Investigate the performance impact of Option here!
-struct Reservoir<T: Copy> {
-    current : Option<T>,
-    total_weight : f32,
-}
-
-impl<T: Copy> Reservoir<T> {
-    fn new() -> Self {
-        Self{current: None, total_weight: 0.0}
-    }
-
-    fn get(&self) -> &Option<T> {
-        &self.current
-    }
-
-    fn add(&mut self, item: T, weight: f32) {
-        if self.current.is_none() {
-            self.current = Some(item);
-        }
-
-        //else if fastrand::f32() * (self.total_weight + weight) > self.total_weight {
-        else if fastrand::f32() <= weight / self.total_weight {
-
-            self.current = Some(item);
-        }
-
-        self.total_weight += weight;
-    }
-}
 
 
 struct SizedReservoir<T: Copy, const SIZE : usize> {
@@ -148,9 +111,6 @@ lazy_static! {
             sphere(vec3(4.0, 4.0, -1.0), 1.0, vec3(1.0, 1.0,1.0), 10.0),
             //sphere(vec3(-3.0, 2.0, -2.0), 1.0, vec3(0.2, 0.2, 1.0), 10.0),
 
-
-            //sphere(vec3(0.0, 10.0, -2.0), 0.001, vec3(1.0, 1.0, 1.0), 100.0),
-           // sphere(vec3(0.0, 10.0, -1.0), 1.0, vec3(1.0, 1.0, 1.0), 40.0),
             sphere(vec3(0.0, 1.0, -4.0), 1.0, vec3(0.0, 0.0, 1.0), 0.0),
             sphere(vec3(1.0, 0.25, -1.0), 0.2, vec3(1.0, 1.0, 0.0), 0.0)]
     };
@@ -247,16 +207,6 @@ fn random_point_on_light() -> (&'static Sphere, glm::Vec3) {
     let light = LIGHTS[fastrand::usize(0..LIGHTS.len())];
     let point = FIB_SPHERE[fastrand::usize(0..FIB_SPHERE.len())];
 
-    //let's try res sampling here
-    // let mut res = Reservoir::new();
-    // for light in LIGHTS.iter() {
-    //     res.add(light, light.radius.powi(2));
-    // }
-    // let light = res.get().unwrap();
-
-    //let light = LIGHTS[random() % LIGHTS.len()];
-    //let point = FIB_SPHERE[random() % FIB_SPHERE.len()];
-
     // Then, return it as a point on the light
     (light, light.center + point * light.radius)
 }
@@ -287,78 +237,6 @@ impl Camera {
             Some(x) => std::ptr::eq(target, x)
         }
     }
-
-    pub fn cast_ray(ray: &Ray, bounces: usize) -> glm::Vec3 {
-        let mut color = vec3(0.0, 0.0, 0.0);
-
-        if bounces <= 0 {
-            return color;
-        }
-
-        let mut closest_hit: Option<HitRecord> = None;
-
-        for sphere in &SCENE.spheres {    
-            if let Some(hit) = ray_sphere_intersection(ray, &sphere, 0.001, 10000.0) {
-                if closest_hit.is_none() {
-                    closest_hit = Some(hit)
-                } 
-                if hit.dist < closest_hit.as_ref().unwrap().dist{
-                    closest_hit = Some(hit);
-                }
-            }
-        }
-
-        if let Some(hit) = closest_hit {
-            // do some naive stuff here, none of that reSTIR for me!
-            let diffuse_reflection = Ray{origin: hit.point, dir: random_vec3_in_hemi(hit.norm)};
-            let l_dot_n = glm::dot(hit.norm, diffuse_reflection.dir);
-
-            color = color + hit.mat.color * hit.mat.brightness;
-            color = color + hit.mat.color * Camera::cast_ray(&diffuse_reflection, bounces - 1) * l_dot_n;
-        }
-        
-        color
-    }
-
-
-    pub fn cast_ray_shitty(ray: &Ray, bounces: usize) -> glm::Vec3 {
-        let mut color = vec3(0.0, 0.0, 0.0);
-
-        if bounces <= 0 {
-            return color;
-        }
-
-        let mut closest_hit: Option<HitRecord> = None;
-
-        for sphere in &SCENE.spheres {    
-            if let Some(hit) = ray_sphere_intersection(ray, &sphere, 0.001, 10000.0) {
-                if closest_hit.is_none() {
-                    closest_hit = Some(hit)
-                } 
-                if hit.dist < closest_hit.as_ref().unwrap().dist{
-                    closest_hit = Some(hit);
-                }
-            }
-        }
-
-        if let Some(hit) = closest_hit {
-            // do some naive stuff here, none of that reSTIR for me!
-            //let diffuse_reflection = Ray{origin: hit.point, dir: random_vec3_in_hemi(hit.norm)};
-            for light in LIGHTS.iter() {
-                let light_vec = glm::normalize(light.center - hit.point);
-                
-                let shadow_ray = Ray{origin: hit.point, dir: light_vec};
-                if Camera::ray_hits(&shadow_ray, light) {
-                    let l_dot_n = glm::dot(hit.norm, light_vec);
-                    color = color + hit.mat.color * light.mat.color  * l_dot_n;
-                }
-                
-            }
-        }
-        
-        color
-    }
-
 
 
     pub fn cast_ray_restir(ray: &Ray) -> glm::Vec3 {
@@ -395,7 +273,7 @@ impl Camera {
                 let (light, point) = random_point_on_light();
                 
                 // Then calculate our weight
-                let light_dir = random_vec3_in_hemi(hit.norm); // glm::normalize(point - hit.point);
+                let light_dir =  glm::normalize(point - hit.point);
 
                 // Cheap weight function
                 //let weight = light.mat.brightness * glm::dot(light_dir, hit.norm) * glm::dot(point - hit.point, point - hit.point);
@@ -457,7 +335,7 @@ impl Camera {
                 let mut local_color_cache: Vec<glm::Vec3> = Vec::with_capacity(local_block_size);
                 local_color_cache.resize(local_block_size, glm::vec3(0.0, 0.0, 0.0));
 
-                const NUM_PASSES : u32 = if RESTIR_ENABLE { SAMPLES_PER_PIXEL_RESTIR / SAMPLES_PER_PASS_RESTIR } else { SAMPLES_PER_PIXEL / SAMPLES_PER_PASS };
+                const NUM_PASSES : u32 = SAMPLES_PER_PIXEL / SAMPLES_PER_PASS;
 
                 for i in 0..NUM_PASSES {
                     for y in start_y..end_y {
@@ -469,7 +347,7 @@ impl Camera {
 
                             let mut color = local_color_cache[local_pixel_index];
 
-                            for _ in 0.. if RESTIR_ENABLE { SAMPLES_PER_PASS_RESTIR } else { SAMPLES_PER_PASS } {
+                            for _ in 0.. SAMPLES_PER_PASS {
                                 let x_offset = fastrand::f32();
                                 let y_offset = fastrand::f32();
 
@@ -478,16 +356,13 @@ impl Camera {
                     
                                 let ray = Ray{origin: pos, dir: lower_left_corner + horizontal*u + vertical*v - pos};
                                 
-                                if (RESTIR_ENABLE) {
-                                    color = color + Camera::cast_ray_restir(&ray);
-                                } else {
-                                    color = color + Camera::cast_ray(&ray, 8);
-                                }
+                                color = color + Camera::cast_ray_restir(&ray);
+
                             }
                             
                             local_color_cache[local_pixel_index] = color;
 
-                            let scale = 1.0 / ((i + 1) * if RESTIR_ENABLE { SAMPLES_PER_PASS_RESTIR } else { SAMPLES_PER_PASS }) as f32;
+                            let scale = 1.0 / ((i + 1) * SAMPLES_PER_PASS) as f32;
                             color = vec3((scale * color.x).sqrt(), (scale * color.y).sqrt(), (scale * color.z).sqrt());
                             
 
@@ -505,9 +380,6 @@ impl Camera {
                             println!("Error sending pixel! Thread {}. Error: {}", thread_id, result.unwrap_err());
                         }
                     }
-                }
-                unsafe {
-                    ActiveThreads.fetch_sub(1, Acquire);
                 }
 
                 println!("Thread finished in {:.2?}!", start_time.elapsed());
@@ -538,7 +410,6 @@ fn main() {
 
     camera.cast_rays(tx);
 
-    let mut done : bool = false;
 
     while !renderer.should_close() {
         for _ in 0..NUM_THREADS * 4 {
@@ -549,12 +420,7 @@ fn main() {
             }
         }
 
-        unsafe {
-            if !done && ActiveThreads.load(Acquire) <= 0 {
-                done = true;
-                println!("DONE");
-            }
-        }
+
         renderer.update();
     }
 }
